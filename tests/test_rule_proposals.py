@@ -23,17 +23,17 @@ def test_proposal_request_sends_schema_metadata_but_not_record_values(monkeypatc
         strict=True,
     )
 
-    class FakeResponses:
+    class FakeMessages:
         def parse(self, **kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(output_parsed=parsed_proposal)
+            return SimpleNamespace(parsed_output=parsed_proposal)
 
-    class FakeOpenAI:
+    class FakeAnthropic:
         def __init__(self, *, api_key: str) -> None:
             captured["api_key"] = api_key
-            self.responses = FakeResponses()
+            self.messages = FakeMessages()
 
-    monkeypatch.setattr(rule_proposals, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(rule_proposals, "Anthropic", FakeAnthropic)
     dataframe = pd.DataFrame(
         {
             "participant_id": ["record-secret-P001"],
@@ -48,7 +48,7 @@ def test_proposal_request_sends_schema_metadata_but_not_record_values(monkeypatc
         model="test-model",
     )
 
-    user_context = json.loads(captured["input"][1]["content"])
+    user_context = json.loads(captured["messages"][0]["content"])
     assert user_context == {
         "dataset_columns": [
             {"name": "participant_id", "data_type": "object"},
@@ -56,6 +56,7 @@ def test_proposal_request_sends_schema_metadata_but_not_record_values(monkeypatc
         ],
         "study_notes": "participant_id is required",
     }
-    assert "record-secret-P001" not in captured["input"][1]["content"]
-    assert captured["text_format"] is RuleSet
+    assert "record-secret-P001" not in captured["messages"][0]["content"]
+    assert captured["system"] == rule_proposals.SYSTEM_PROMPT
+    assert captured["output_format"] is RuleSet
     assert proposal == parsed_proposal

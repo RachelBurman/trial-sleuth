@@ -22,6 +22,10 @@ from trialsleuth.validation import Finding, infer_column_roles, run_validations
 
 APP_ROOT = Path(__file__).parent
 DEMO_CSV = APP_ROOT / "sample_data" / "synthetic_trial_data.csv"
+DEMO_STUDY_RULES = """age is required and must be between 18 and 65 inclusive.
+sex is required and must be exactly Female or Male; matching is case-sensitive.
+status is required and must be exactly Enrolled, Active, or Completed; matching is case-sensitive.
+For each participant_id, the Week 4 visit_date must occur 28 +/- 3 days after the Baseline visit."""
 
 
 st.set_page_config(
@@ -106,12 +110,12 @@ def dataset_fingerprint(dataframe: pd.DataFrame, notes: str) -> str:
     return digest.hexdigest()
 
 
-def configured_openai_api_key() -> str | None:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
+def configured_anthropic_api_key() -> str | None:
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if key:
         return key
     try:
-        secret = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+        secret = str(st.secrets.get("ANTHROPIC_API_KEY", "")).strip()
     except (FileNotFoundError, KeyError):
         return None
     return secret or None
@@ -143,13 +147,25 @@ def verified_summary(findings: list[Finding]) -> pd.DataFrame:
 with st.sidebar:
     st.header("Investigation")
     uploaded_file = st.file_uploader("Upload trial data", type=["csv"])
+    load_demo_rules = st.button(
+        "Load demo study rules",
+        icon=":material/science:",
+        width="stretch",
+        disabled=uploaded_file is not None,
+    )
+    if load_demo_rules:
+        st.session_state["study_notes"] = DEMO_STUDY_RULES
+        st.session_state.pop("rule_proposal", None)
+        st.session_state.pop("rule_proposal_context", None)
+        st.session_state.pop("verified_rule_findings", None)
+        st.session_state.pop("verified_rule_context", None)
     study_notes = st.text_area(
         "Study rules / data-dictionary notes",
         placeholder="Example: Visit 2 must occur 28 +/- 3 days after baseline.",
         height=150,
         key="study_notes",
     )
-    st.caption("AI proposes constrained rules; deterministic code verifies accepted rules.")
+    st.caption("Claude proposes constrained rules; deterministic code verifies accepted rules.")
 
 try:
     if uploaded_file is None:
@@ -171,8 +187,8 @@ if dataframe.empty or len(dataframe.columns) == 0:
     st.warning("The selected CSV has no data rows to investigate.")
     st.stop()
 
-api_key = configured_openai_api_key()
-model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+api_key = configured_anthropic_api_key()
+model = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 proposal_context = dataset_fingerprint(dataframe, study_notes)
 
 with st.sidebar:
@@ -185,7 +201,7 @@ with st.sidebar:
     )
     if api_key is None:
         st.info(
-            "AI rule proposals are unavailable because `OPENAI_API_KEY` is not configured. "
+            "AI rule proposals are unavailable because `ANTHROPIC_API_KEY` is not configured. "
             "Built-in checks remain active."
         )
 
@@ -298,8 +314,13 @@ with findings_tab:
 
 with study_rules_tab:
     st.subheader("AI-assisted study rules")
+    st.markdown(
+        "**Natural-language study specification** -> **AI-proposed structured rules** "
+        "-> **Schema validated** -> **Deterministically executed** "
+        "-> **Evidence-backed findings**"
+    )
     st.caption(
-        "The AI translates notes into predefined rule values. It does not inspect records "
+        "Claude translates notes into predefined rule values. It does not inspect records "
         "or decide whether a record is erroneous."
     )
 

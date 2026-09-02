@@ -351,3 +351,59 @@ def test_visit_window_keeps_participant_identifiers_case_sensitive() -> None:
     )
 
     assert execute_rule_set(proposal, dataframe)[0].affected_rows == (2,)
+
+
+def test_bundled_data_has_deterministic_violations_for_demo_rules() -> None:
+    dataframe = pd.read_csv("sample_data/synthetic_trial_data.csv")
+    proposal = rule_set(
+        [
+            {"rule_type": "required", "severity": "High", "field": "age"},
+            {
+                "rule_type": "numeric_range",
+                "severity": "High",
+                "field": "age",
+                "minimum": 18.0,
+                "maximum": 65.0,
+                "minimum_inclusive": True,
+                "maximum_inclusive": True,
+            },
+            {"rule_type": "required", "severity": "High", "field": "sex"},
+            {
+                "rule_type": "allowed_values",
+                "severity": "Medium",
+                "field": "sex",
+                "allowed_values": ["Female", "Male"],
+                "case_sensitive": True,
+            },
+            {"rule_type": "required", "severity": "High", "field": "status"},
+            {
+                "rule_type": "allowed_values",
+                "severity": "Medium",
+                "field": "status",
+                "allowed_values": ["Enrolled", "Active", "Completed"],
+                "case_sensitive": True,
+            },
+            {
+                "rule_type": "visit_window",
+                "severity": "High",
+                "participant_field": "participant_id",
+                "visit_field": "visit",
+                "date_field": "visit_date",
+                "anchor_visit": "Baseline",
+                "target_visit": "Week 4",
+                "expected_days": 28,
+                "tolerance_days": 3,
+            },
+        ]
+    )
+
+    findings = execute_rule_set(proposal, dataframe)
+    rows_by_rule = {finding.rule_tested: finding.affected_rows for finding in findings}
+
+    assert rows_by_rule["age must be populated"] == (19,)
+    assert rows_by_rule["age must be >= 18.0 and <= 65.0"] == (18,)
+    assert rows_by_rule["sex must be populated"] == (15,)
+    assert rows_by_rule["sex must be one of: Female, Male"] == (1,)
+    assert rows_by_rule["status must be populated"] == (19,)
+    assert rows_by_rule["status must be one of: Enrolled, Active, Completed"] == (10,)
+    assert rows_by_rule["Week 4 must occur 28 +/- 3 days after Baseline"] == (10, 13)

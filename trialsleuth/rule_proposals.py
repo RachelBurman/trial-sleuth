@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 
 import pandas as pd
-from openai import OpenAI
+from anthropic import Anthropic
 
 from .study_rules import RuleSet
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 MAX_NOTES_LENGTH = 12_000
 
 SYSTEM_PROMPT = """
@@ -64,21 +64,20 @@ def propose_rule_set(
     }
 
     try:
-        response = OpenAI(api_key=api_key).responses.parse(
+        response = Anthropic(api_key=api_key).messages.parse(
             model=model,
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(context)},
-            ],
-            text_format=RuleSet,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(context)}],
+            output_format=RuleSet,
         )
     except Exception as error:
         raise RuleProposalError(
-            "The AI service could not create a proposal. Check the configured API key "
+            "Claude could not create a proposal. Check the configured Anthropic API key "
             "and model access."
         ) from error
 
-    proposal = response.output_parsed
+    proposal = response.parsed_output
     if proposal is None:
         raise RuleProposalError("The AI service did not return a rule proposal.")
     return RuleSet.model_validate(proposal.model_dump(mode="json"), strict=True)
