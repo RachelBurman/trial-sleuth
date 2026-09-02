@@ -33,6 +33,7 @@ class Finding:
     affected_rows: tuple[int, ...]
     explanation: str
     columns: tuple[str, ...] = ()
+    rule_tested: str | None = None
 
     @property
     def affected_count(self) -> int:
