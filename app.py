@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from pydantic import ValidationError
 
 from trialsleuth.export import dataframe_to_safe_csv
+from trialsleuth.rule_proposals import DEFAULT_MODEL, RuleProposalError, propose_rule_set
+from trialsleuth.study_rules import (
+    RuleSet,
+    describe_rule,
+    execute_rule_set,
+    validate_rule_set,
+)
 from trialsleuth.validation import Finding, infer_column_roles, run_validations
 
 APP_ROOT = Path(__file__).parent
@@ -86,16 +97,59 @@ def severity_style(value: object) -> str:
     return colours.get(str(value), "")
 
 
+def dataset_fingerprint(dataframe: pd.DataFrame, notes: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(notes.strip().encode("utf-8"))
+    schema = [(str(column), str(dataframe[column].dtype)) for column in dataframe]
+    digest.update(repr(schema).encode())
+    digest.update(pd.util.hash_pandas_object(dataframe, index=True).values.tobytes())
+    return digest.hexdigest()
+
+
+def configured_openai_api_key() -> str | None:
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        secret = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+    except (FileNotFoundError, KeyError):
+        return None
+    return secret or None
+
+
+def proposal_summary(rule_set: RuleSet) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Severity": rule.severity,
+            "Rule type": rule.rule_type.replace("_", " ").title(),
+            "Proposed rule": describe_rule(rule),
+        }
+        for rule in rule_set.rules
+    )
+
+
+def verified_summary(findings: list[Finding]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Severity": finding.severity,
+            "Rule tested": finding.rule_tested,
+            "Affected records": finding.affected_count,
+            "Explanation": finding.explanation,
+        }
+        for finding in findings
+    )
+
+
 with st.sidebar:
     st.header("Investigation")
     uploaded_file = st.file_uploader("Upload trial data", type=["csv"])
-    st.text_area(
+    study_notes = st.text_area(
         "Study rules / data-dictionary notes",
         placeholder="Example: Visit 2 must occur 28 +/- 3 days after baseline.",
         height=150,
         key="study_notes",
     )
-    st.caption("Notes are retained for reference only; they are not evaluated in this MVP.")
+    st.caption("AI proposes constrained rules; deterministic code verifies accepted rules.")
 
 try:
     if uploaded_file is None:
@@ -117,6 +171,43 @@ if dataframe.empty or len(dataframe.columns) == 0:
     st.warning("The selected CSV has no data rows to investigate.")
     st.stop()
 
+api_key = configured_openai_api_key()
+model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+proposal_context = dataset_fingerprint(dataframe, study_notes)
+
+with st.sidebar:
+    propose_clicked = st.button(
+        "Propose study rules",
+        icon=":material/auto_awesome:",
+        type="primary",
+        width="stretch",
+        disabled=not bool(api_key),
+    )
+    if api_key is None:
+        st.info(
+            "AI rule proposals are unavailable because `OPENAI_API_KEY` is not configured. "
+            "Built-in checks remain active."
+        )
+
+if propose_clicked:
+    if not study_notes.strip():
+        st.sidebar.warning("Enter study notes before requesting a proposal.")
+    else:
+        try:
+            with st.spinner("Translating notes into a constrained rule proposal..."):
+                proposal = propose_rule_set(
+                    study_notes,
+                    dataframe,
+                    api_key=api_key or "",
+                    model=model,
+                )
+            st.session_state["rule_proposal"] = proposal.model_dump(mode="json")
+            st.session_state["rule_proposal_context"] = proposal_context
+            st.session_state.pop("verified_rule_findings", None)
+            st.session_state.pop("verified_rule_context", None)
+        except (RuleProposalError, ValueError) as error:
+            st.sidebar.error(str(error))
+
 findings = run_validations(dataframe)
 profile = build_profile(dataframe)
 affected_rows = {row for finding in findings for row in finding.affected_rows}
@@ -135,7 +226,7 @@ with source_column:
 
 metric_columns = st.columns(4)
 metric_columns[0].metric("Rows", f"{len(dataframe):,}")
-metric_columns[1].metric("Findings", f"{len(findings):,}")
+metric_columns[1].metric("Built-in findings", f"{len(findings):,}")
 metric_columns[2].metric("Rows affected", f"{len(affected_rows):,}")
 metric_columns[3].metric(
     "Completeness",
@@ -144,9 +235,12 @@ metric_columns[3].metric(
     delta_color="inverse",
 )
 
-findings_tab, profile_tab, data_tab = st.tabs(["Findings", "Column profile", "Source data"])
+findings_tab, study_rules_tab, profile_tab, data_tab = st.tabs(
+    ["Built-in findings", "Study rules", "Column profile", "Source data"]
+)
 
 with findings_tab:
+    st.caption("Findings below come from TrialSleuth's built-in deterministic checks.")
     if not findings:
         st.success("No issues were detected by the current checks.")
     else:
@@ -201,6 +295,114 @@ with findings_tab:
                     st.dataframe(evidence.head(200), hide_index=True, width="stretch")
                     if len(evidence) > 200:
                         st.caption(f"Showing 200 of {len(evidence)} affected rows.")
+
+with study_rules_tab:
+    st.subheader("AI-assisted study rules")
+    st.caption(
+        "The AI translates notes into predefined rule values. It does not inspect records "
+        "or decide whether a record is erroneous."
+    )
+
+    proposal_data = st.session_state.get("rule_proposal")
+    proposal: RuleSet | None = None
+    schema_error: str | None = None
+    if proposal_data is not None:
+        try:
+            proposal = RuleSet.model_validate(proposal_data, strict=True)
+        except ValidationError:
+            schema_error = "The proposal no longer conforms to the strict rule schema."
+
+    if proposal is None:
+        if schema_error:
+            st.error(f"Proposal rejected. {schema_error}")
+        else:
+            st.info("Enter study notes and request an AI-proposed rule set from the sidebar.")
+    else:
+        st.markdown("#### AI-proposed rules")
+        proposal_is_current = (
+            st.session_state.get("rule_proposal_context") == proposal_context
+        )
+        if not proposal_is_current:
+            st.warning(
+                "The dataset or study notes changed. Generate a new proposal before verification."
+            )
+
+        summary = proposal_summary(proposal)
+        if summary.empty:
+            st.info("The AI did not identify any supported rules in these notes.")
+        else:
+            st.dataframe(
+                summary.style.map(severity_style, subset=["Severity"]),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Severity": st.column_config.TextColumn(width="small"),
+                    "Rule type": st.column_config.TextColumn(width="medium"),
+                    "Proposed rule": st.column_config.TextColumn(width="large"),
+                },
+            )
+
+        if proposal.unsupported_notes:
+            with st.expander("Unsupported or ambiguous notes"):
+                for note in proposal.unsupported_notes:
+                    st.write(f"- {note}")
+
+        with st.expander("Validated rule specification"):
+            st.json(json.loads(proposal.model_dump_json()))
+
+        semantic_errors = validate_rule_set(proposal, dataframe)
+        if semantic_errors:
+            st.error("Proposal rejected. No rules can run until every issue is resolved.")
+            for error in semantic_errors:
+                st.write(f"- {error}")
+        else:
+            st.success(
+                "Strict schema and dataset validation passed. The rules have not run yet."
+            )
+            verify_clicked = st.button(
+                "Verify accepted rules",
+                icon=":material/fact_check:",
+                disabled=not proposal_is_current or not bool(proposal.rules),
+            )
+            if verify_clicked:
+                st.session_state["verified_rule_findings"] = execute_rule_set(
+                    proposal, dataframe
+                )
+                st.session_state["verified_rule_context"] = proposal_context
+
+        verified_findings = st.session_state.get("verified_rule_findings")
+        verified_is_current = st.session_state.get("verified_rule_context") == proposal_context
+        if verified_findings is not None and verified_is_current:
+            st.markdown("#### Deterministically verified findings")
+            if not verified_findings:
+                st.success("No violations were verified for the accepted study rules.")
+            else:
+                verified_table = verified_summary(verified_findings)
+                st.dataframe(
+                    verified_table.style.map(severity_style, subset=["Severity"]),
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Severity": st.column_config.TextColumn(width="small"),
+                        "Rule tested": st.column_config.TextColumn(width="large"),
+                        "Affected records": st.column_config.NumberColumn(
+                            format="%d", width="small"
+                        ),
+                        "Explanation": st.column_config.TextColumn(width="large"),
+                    },
+                )
+                st.subheader("Verified evidence")
+                for finding in verified_findings:
+                    label = (
+                        f"{finding.severity} | {finding.affected_count} records | "
+                        f"{finding.rule_tested}"
+                    )
+                    with st.expander(label):
+                        st.write(finding.explanation)
+                        evidence = finding.evidence(dataframe)
+                        st.dataframe(evidence.head(200), hide_index=True, width="stretch")
+                        if len(evidence) > 200:
+                            st.caption(f"Showing 200 of {len(evidence)} affected rows.")
 
 with profile_tab:
     st.dataframe(
