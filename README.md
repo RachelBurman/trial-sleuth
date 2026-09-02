@@ -18,6 +18,13 @@ AI-proposed study rules support required fields, numeric ranges, allowed categor
 
 Participant, visit, and date roles are inferred from common column names such as `participant_id`, `USUBJID`, `visit`, `timepoint`, and `visit_date`. A synthetic dataset with planted errors loads automatically for the demo.
 
+## AI safety boundary
+
+- Claude receives the study notes and dataset column names and data types, but never record values.
+- Claude can only return the supported rule types through a strict Pydantic schema. Proposals containing unknown fields, executable code, invalid bounds, missing columns, duplicate rules, incompatible data types, or ambiguous values are rejected before execution.
+- A proposal is tied to the exact dataset and study notes used to create it. Changing either invalidates the proposal and any verified findings until a new proposal is generated.
+- Accepted rules run through fixed, deterministic Python validation functions. Claude does not execute rules or decide which records are erroneous.
+
 ## Run locally
 
 Requires Python 3.11 or newer.
@@ -34,11 +41,23 @@ Open `http://localhost:8501`, then use the sidebar to upload a CSV or investigat
 
 Set `ANTHROPIC_MODEL` to override the default `claude-haiku-4-5-20251001` proposal model. Only column names, data types, and the entered study notes are sent to Claude; record values remain local. Without an Anthropic API key, the proposal control is disabled and all existing functionality remains available. Use **Load demo study rules** with the bundled synthetic data for a repeatable end-to-end demonstration.
 
+## Demo workflow
+
+1. Start the app and keep the bundled **Synthetic example** dataset selected.
+2. Click **Load demo study rules** in the sidebar.
+3. With `ANTHROPIC_API_KEY` configured, click **Propose study rules**.
+4. Open the **Study rules** tab and review the proposed rules, unsupported notes, and validated specification.
+5. Click **Verify accepted rules** to execute the fixed validators and inspect the evidence-backed findings.
+
+Uploading a CSV disables the bundled demo-rule shortcut. Built-in findings, the column profile, source-data inspection, and findings export remain available without an Anthropic key.
+
 ## Tests
 
 ```bash
 pytest
 ```
+
+The current suite contains 22 tests covering the Streamlit workflow, provider privacy boundary, strict rule parsing and dataset validation, deterministic rule execution, built-in checks, and spreadsheet-safe CSV export.
 
 ## Structure
 
@@ -48,4 +67,8 @@ pytest
 - `trialsleuth/rule_proposals.py`: schema-constrained Anthropic proposal adapter
 - `trialsleuth/export.py`: spreadsheet-safe findings export
 - `sample_data/synthetic_trial_data.csv`: demo data with planted issues
-- `tests/test_validation.py`: focused validation tests
+- `tests/test_app.py`: Streamlit workflow smoke test
+- `tests/test_rule_proposals.py`: Anthropic adapter and record-privacy test
+- `tests/test_study_rules.py`: rule schema, dataset validation, and execution tests
+- `tests/test_validation.py`: built-in validation tests
+- `tests/test_export.py`: spreadsheet-safe export test
