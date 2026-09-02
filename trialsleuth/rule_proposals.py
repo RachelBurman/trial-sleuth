@@ -10,6 +10,7 @@ from anthropic import Anthropic
 from .study_rules import RuleSet
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+ANTHROPIC_API_URL = "https://api.anthropic.com"
 MAX_NOTES_LENGTH = 12_000
 
 SYSTEM_PROMPT = """
@@ -64,7 +65,7 @@ def propose_rule_set(
     }
 
     try:
-        response = Anthropic(api_key=api_key).messages.parse(
+        response = Anthropic(api_key=api_key, base_url=ANTHROPIC_API_URL).messages.parse(
             model=model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
@@ -72,10 +73,21 @@ def propose_rule_set(
             output_format=RuleSet,
         )
     except Exception as error:
-        raise RuleProposalError(
-            "Claude could not create a proposal. Check the configured Anthropic API key "
-            "and model access."
-        ) from error
+        status_code = getattr(error, "status_code", None)
+        if status_code == 401:
+            message = "Anthropic rejected the configured API key."
+        elif status_code == 403:
+            message = (
+                "Anthropic blocked this request (HTTP 403). Confirm that the runtime region "
+                "and Anthropic workspace are permitted to use the API."
+            )
+        elif status_code == 404:
+            message = f"The configured Anthropic model {model!r} is unavailable."
+        elif status_code == 429:
+            message = "Anthropic rate-limited the proposal request. Try again shortly."
+        else:
+            message = "Anthropic could not create a proposal. Try again or check API access."
+        raise RuleProposalError(message) from error
 
     proposal = response.parsed_output
     if proposal is None:

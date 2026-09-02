@@ -37,17 +37,17 @@ export ANTHROPIC_API_KEY="your-api-key"  # Optional; built-in checks work withou
 streamlit run app.py
 ```
 
-Open `http://localhost:8501`, then use the sidebar to upload a CSV or investigate the built-in example.
+Open `http://localhost:8501`, then import a CSV from the sidebar or investigate the clearly labeled demo dataset.
 
-Set `ANTHROPIC_MODEL` to override the default `claude-haiku-4-5-20251001` proposal model. Only column names, data types, and the entered study notes are sent to Claude; record values remain local. Without an Anthropic API key, the proposal control is disabled and all existing functionality remains available. Use **Load demo study rules** with the bundled synthetic data for a repeatable end-to-end demonstration.
+Set `ANTHROPIC_MODEL` to override the default `claude-haiku-4-5-20251001` proposal model. Only column names, data types, and the entered study notes are sent to Claude; record values remain local. Without an Anthropic API key, the proposal control is disabled and all existing functionality remains available. Keep credentials in environment variables or deployment secrets, never in `.streamlit/config.toml` or source control.
 
 ## Demo workflow
 
 1. Start the app and keep the bundled **Synthetic example** dataset selected.
-2. Click **Load demo study rules** in the sidebar.
-3. With `ANTHROPIC_API_KEY` configured, click **Propose study rules**.
-4. Open the **Study rules** tab and review the proposed rules, unsupported notes, and validated specification.
-5. Click **Verify accepted rules** to execute the fixed validators and inspect the evidence-backed findings.
+2. Open **Study checks** and click **Load demo rules**.
+3. With `ANTHROPIC_API_KEY` configured, click **Generate proposed checks**.
+4. Review the proposed checks and deselect any that should not run.
+5. Click **Run selected checks** to execute the fixed validators and inspect the evidence-backed findings.
 
 Uploading a CSV disables the bundled demo-rule shortcut. Built-in findings, the column profile, source-data inspection, and findings export remain available without an Anthropic key.
 
@@ -57,11 +57,11 @@ Uploading a CSV disables the bundled demo-rule shortcut. Built-in findings, the 
 pytest
 ```
 
-The current suite contains 22 tests covering the Streamlit workflow, provider privacy boundary, strict rule parsing and dataset validation, deterministic rule execution, built-in checks, and spreadsheet-safe CSV export.
+The current suite contains 24 tests covering the Streamlit workflow, provider privacy boundary and errors, strict rule parsing and dataset validation, deterministic rule execution, built-in checks, and spreadsheet-safe CSV export.
 
 ## Structure
 
-- `app.py`: Streamlit dashboard and dataset profile
+- `app.py`: Streamlit investigation workspace, study-check workflow, and dataset profile
 - `trialsleuth/validation.py`: deterministic validation functions
 - `trialsleuth/study_rules.py`: strict rule schema and deterministic rule interpreter
 - `trialsleuth/rule_proposals.py`: schema-constrained Anthropic proposal adapter
