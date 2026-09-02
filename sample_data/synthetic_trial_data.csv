@@ -1,0 +1,21 @@
+participant_id,visit,visit_date,age,systolic_bp,sex,status,site
+P001,Screening,2026-01-05,45,118,Female,Enrolled,North
+P001,Baseline,2026-01-12,45,121,female,Active,North
+P001,Week 4,2026-02-09,45,119,Female,Active,North
+P002,Screening,2026-01-06,62,132,Male,Enrolled,South
+P002,Baseline,2026-01-13,62,135,Male,Active,South
+P002,Week 4,2026-02-10,62,130,Male,Completed,South
+P002,Week 4,2026-02-10,62,130,Male,Completed,South
+P003,Screening,2026-01-07,51,124,Female,Enrolled,East
+P003,Baseline,2026-01-14,51,126,Female,Active,East
+P003,Baseline,2026-01-14,51,141,Female,Active,East
+P003,Week 4,2026-02-30,51,123,Female,completed,East
+P004,Screening,2026-01-03,38,116,Male,Enrolled,West
+P004,Baseline,2026-01-15,38,120,Male,Active,West
+P004,Week 4,2026-01-10,38,117,Male,Active,West
+P005,Screening,2026-01-09,57,129,Female,Enrolled,North
+P005,Baseline,,57,131,,Active,North
+P006,Screening,2026-01-11,49,122,Male,Enrolled,South
+P006,Baseline,not-a-date,49,124,Male,Active,South
+P007,Screening,2026-01-12,66,280,Female,Enrolled," north "
+P008,Screening,2026-01-13,,127,Male,,North
